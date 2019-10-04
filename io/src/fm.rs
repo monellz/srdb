@@ -15,7 +15,7 @@ pub struct FileManager {
 
 impl FileManager {
     pub fn new() -> FileManager {
-        //设置当当前路径为data
+        //设置当前路径为data
         //println!("{:?}", env::current_dir().unwrap());
         env::set_current_dir("../data/").expect("fm::new set_current_dir");
         FileManager {
@@ -23,6 +23,11 @@ impl FileManager {
             perm_id: HashMap::new(),
             next_id: 0,
         }
+    }
+
+    pub fn show_database() {
+        unimplemented!();
+        //遍历data文件夹
     }
 
     pub fn use_db(&mut self, db_name: &str) {
@@ -63,7 +68,7 @@ impl FileManager {
         create_dir(db_name).expect("fm::craete_db");        
     }
 
-    pub fn write_page(&self, fname: &str, page_id: u32, buf: &[u8]) {
+    pub fn write_page(&self, fname: &str, page_id: usize, buf: &[u8]) {
         let mut f = match self.current_db.as_ref() {
             Some(db_name) => {
                 let fpath = format!("{}/{}", db_name, fname);
@@ -76,7 +81,7 @@ impl FileManager {
         f.write_all(buf).expect("fm::write_page write_all");
     }
 
-    pub fn read_page(&self, fname: &str, page_id: u32, buf: &mut [u8]){
+    pub fn read_page(&self, fname: &str, page_id: usize, buf: &mut [u8]){
         let mut f = match self.current_db.as_ref() {
             Some(db_name) => {
                 let fpath = format!("{}/{}", db_name, fname);
