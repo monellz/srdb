@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions, create_dir};
 use std::env;
 use std::io::{SeekFrom, prelude::*};
+use std::os::unix::prelude::FileExt;
 
 
 
@@ -69,29 +70,29 @@ impl FileManager {
     }
 
     pub fn write_page(&self, fname: &str, page_id: usize, buf: &[u8]) {
-        let mut f = match self.current_db.as_ref() {
+        let f = match self.current_db.as_ref() {
             Some(db_name) => {
                 let fpath = format!("{}/{}", db_name, fname);
-                OpenOptions::new().append(true).open(fpath).expect("fm::write_page open file")
+                //File::open(fpath).expect("fm::write_page open file")
+                OpenOptions::new().write(true).open(fpath).expect("fm::write_page open file")
             },
             None => panic!("not use any database"),
         };
         debug_assert_eq!(buf.len(), PAGE_SIZE, "buf size != PAGE_SIZE");
-        f.seek(SeekFrom::Start((page_id as u64) << 13)).expect("fm::write_page seek");
-        f.write_all(buf).expect("fm::write_page write_all");
+        assert!(f.write_at(buf, (page_id as u64) << PAGE_SIZE_BASE).expect("fm::write_page write") == buf.len());
     }
 
     pub fn read_page(&self, fname: &str, page_id: usize, buf: &mut [u8]){
-        let mut f = match self.current_db.as_ref() {
+        let f = match self.current_db.as_ref() {
             Some(db_name) => {
                 let fpath = format!("{}/{}", db_name, fname);
-                OpenOptions::new().read(true).open(fpath).expect("fm::write_page open file")
+                File::open(fpath).expect("fm::read_page open file")
+                //OpenOptions::new().read(true).open(fpath).expect("fm::write_page open file")
             },
             None => panic!("not use any database"),
         };
         debug_assert_eq!(buf.len(), PAGE_SIZE, "buf size != PAGE_SIZE");
-        f.seek(SeekFrom::Start((page_id as u64) << 13)).expect("fm::read_page seek");
-        f.read_exact(buf).expect("fm::read_page read_exact");
+        assert!(f.read_at(buf, (page_id as u64) << PAGE_SIZE_BASE).expect("fm::read_page read") == buf.len());
     }
 
     pub fn get_perm_id(&self, fname: &str) -> u32 {

@@ -10,8 +10,12 @@ struct FindReplace {
 
 impl FindReplace {
     fn new(capacity: usize) -> FindReplace {
+        let mut list = MultiList::new(capacity, 1);
+        for i in 0..BUF_PAGE_CAPACITY {
+            list.insert(0, i as usize);
+        }
         FindReplace {
-            list: MultiList::new(capacity, 1),
+            list,
         }
     }
 
@@ -80,7 +84,8 @@ pub struct BufManager {
     pub fm: FileManager,
     
     dirty: [bool; BUF_PAGE_CAPACITY],
-    buffer: [u8; BUF_PAGE_CAPACITY * PAGE_SIZE],
+    //buffer: [u8; BUF_PAGE_CAPACITY * PAGE_SIZE],
+    buffer: Vec<u8>,
 
     //双向
     hash: CustomHashMap,
@@ -92,11 +97,16 @@ pub struct BufManager {
 
 impl BufManager {
     pub fn new() -> BufManager {
-        //每次更改当前数据库都需要重新new出BufManager
+        //TODO
+        //每次更改当前数据库应该怎么处理?
+        //注: buffer申请非常慢
+        let mut buffer: Vec<u8> = Vec::new();
+        buffer.reserve(BUF_PAGE_CAPACITY * PAGE_SIZE);
+        buffer.resize(BUF_PAGE_CAPACITY * PAGE_SIZE, b'\0');
         BufManager {
             fm: FileManager::new(),
             dirty: [false; BUF_PAGE_CAPACITY],
-            buffer: [b'\0'; BUF_PAGE_CAPACITY * PAGE_SIZE],
+            buffer: buffer,
             hash: CustomHashMap::new(),
             findreplace: FindReplace::new(BUF_PAGE_CAPACITY),
             last: None, 
@@ -108,6 +118,7 @@ impl BufManager {
 
         //找到一个空闲页
         let idx = self.findreplace.find();
+        debug_assert!(idx < BUF_PAGE_CAPACITY);
         
         if self.dirty[idx] {
             //若为dirty　则需要先写入文件才能继续使用
@@ -133,7 +144,7 @@ impl BufManager {
         idx
     }
 
-    pub fn get_page(&mut self, fname: &str, page_id: usize) -> usize {
+    pub fn get_buf_id(&mut self, fname: &str, page_id: usize) -> usize {
         //找到fname的page_id对应的缓存的id
         match self.hash.find_idx(fname, page_id) {
             Some(&idx) => {
@@ -181,6 +192,8 @@ impl BufManager {
         //判断dirty是否需要写回
         if self.dirty[idx] {
             let (fname, page_id) = self.hash.find_page(idx).expect("bm::write back");
+            println!("in write_back (fname, page_id) and idx = ({}, {}) {}", fname, page_id, idx);
+            println!("{:?}", &self.buffer[idx * PAGE_SIZE..(idx * PAGE_SIZE + 10)]);
             self.fm.write_page(fname, *page_id, &mut self.buffer[idx * PAGE_SIZE..(idx + 1) * PAGE_SIZE]);
             self.dirty[idx] = false;
         }
@@ -206,10 +219,17 @@ impl BufManager {
 
     pub fn write(&mut self, idx: usize, buf: &[u8], offset: usize) {
         //在 idx * PAGE_SIZE + offset　开始写buf中全部内容
+
+        //TODO 是否需要限制输入内容仅写入一页??
+        if offset + buf.len() > PAGE_SIZE {
+            unimplemented!();
+        }
         assert!(idx * PAGE_SIZE + offset + buf.len() < BUF_PAGE_CAPACITY * PAGE_SIZE);
         unsafe {
             let dst_ptr = self.buffer.as_mut_ptr().offset((idx * PAGE_SIZE + offset) as isize);
             std::ptr::copy_nonoverlapping(buf.as_ptr(), dst_ptr, buf.len());
         }
+        debug_assert!(self.buffer[idx * PAGE_SIZE + offset] == buf[0]);
+        self.dirty[idx] = true;
     }
 }
