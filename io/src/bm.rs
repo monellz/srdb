@@ -2,6 +2,7 @@ use crate::fm::FileManager;
 use util::constants::*;
 use util::list::MultiList;
 use std::collections::HashMap;
+use bimap::BiMap;
 
 //替换算法
 struct FindReplace {
@@ -88,7 +89,8 @@ pub struct BufManager {
     buffer: Vec<u8>,
 
     //双向
-    hash: CustomHashMap,
+    //idx:缓存页页码  <-> (file_id:文件id, page_id:物理页页码)
+    hash: BiMap<usize, (usize, usize)>,
 
     findreplace: FindReplace,
     last: Option<usize>,
@@ -107,12 +109,12 @@ impl BufManager {
             fm: FileManager::new(),
             dirty: [false; BUF_PAGE_CAPACITY],
             buffer: buffer,
-            hash: CustomHashMap::new(),
+            hash: BiMap::new(),
             findreplace: FindReplace::new(BUF_PAGE_CAPACITY),
             last: None, 
         }
     }
-    pub fn fetch_page(&mut self, fname: &str, page_id: usize) -> usize {
+    pub fn fetch_page(&mut self, file_id: usize, page_id: usize) -> usize {
         //给文件fname的page_id页分配一个buf中的页面 返回分配的buf页号
         //调用者确保page_id页没有在缓存buf中
 
@@ -122,31 +124,31 @@ impl BufManager {
         
         if self.dirty[idx] {
             //若为dirty　则需要先写入文件才能继续使用
-            let (prev_fname, prev_page_id) = self.hash.find_page(idx).expect("bm::fetch_page find page");;
-            self.fm.write_page(prev_fname, *prev_page_id, &self.buffer[idx * PAGE_SIZE..(idx + 1) * PAGE_SIZE]);
+            let (prev_file_id, prev_page_id) = self.hash.get_by_left(&idx).expect("bm::fetch_page find page");
+            self.fm.write_page_by_file_id(*prev_file_id, *prev_page_id, &self.buffer[idx * PAGE_SIZE..(idx + 1) * PAGE_SIZE]);
             self.dirty[idx] = false;
         }
 
-        //更新hashmap
-        self.hash.update(idx, fname, page_id);
+        //更新bimap
+        self.hash.insert(idx, (file_id, page_id));
         idx
     }
 
-    pub fn alloc_page(&mut self, fname: &str, page_id: usize, is_read: bool) -> usize {
-        //在缓存中给fname的page_id文件页分配缓存页
+    pub fn alloc_page(&mut self, file_id: usize, page_id: usize, is_read: bool) -> usize {
+        //在缓存中给file_id的page_id文件页分配缓存页
         //is_read决定是否将文件内容读入分配的缓存页中
 
-        let idx = self.fetch_page(fname, page_id);
+        let idx = self.fetch_page(file_id, page_id);
         if is_read {
             //将文件内容读入buf
-            self.fm.read_page(fname, page_id, &mut self.buffer[idx * PAGE_SIZE..(idx + 1) * PAGE_SIZE]);
+            self.fm.read_page_by_file_id(file_id, page_id, &mut self.buffer[idx * PAGE_SIZE..(idx + 1) * PAGE_SIZE]);
         }
         idx
     }
 
-    pub fn get_buf_id(&mut self, fname: &str, page_id: usize) -> usize {
+    pub fn get_buf_id(&mut self, file_id: usize, page_id: usize) -> usize {
         //找到fname的page_id对应的缓存的id
-        match self.hash.find_idx(fname, page_id) {
+        match self.hash.get_by_right(&(file_id, page_id)) {
             Some(&idx) => {
                 //若存在 则标记为已访问
                 self.access(idx);
@@ -154,9 +156,9 @@ impl BufManager {
             },
             None => {
                 //不存在　则进行缓存页分配
-                let idx = self.fetch_page(fname, page_id);
+                let idx = self.fetch_page(file_id, page_id);
                 //再将文件中的内容读入到idx对应的缓冲页中
-                self.fm.read_page(fname, page_id, &mut self.buffer[idx * PAGE_SIZE..(idx + 1) * PAGE_SIZE]);
+                self.fm.read_page_by_file_id(file_id, page_id, &mut self.buffer[idx * PAGE_SIZE..(idx + 1) * PAGE_SIZE]);
                 idx
             },
         }
@@ -184,17 +186,17 @@ impl BufManager {
         //将idx标记为空闲(下次findreplace首先找到它)
         self.dirty[idx] = false;
         self.findreplace.free(idx); //此时idx被插入链表首
-        self.hash.erase(idx);
+        self.hash.remove_by_left(&idx);
     }
 
     pub fn write_back(&mut self, idx: usize) {
         //将idx标记为空闲
         //判断dirty是否需要写回
         if self.dirty[idx] {
-            let (fname, page_id) = self.hash.find_page(idx).expect("bm::write back");
-            println!("in write_back (fname, page_id) and idx = ({}, {}) {}", fname, page_id, idx);
+            let &(file_id, page_id) = self.hash.get_by_left(&idx).expect("bm::write back");
+            println!("in write_back (file_id, page_id) and idx = ({}, {}) {}", file_id, page_id, idx);
             println!("{:?}", &self.buffer[idx * PAGE_SIZE..(idx * PAGE_SIZE + 10)]);
-            self.fm.write_page(fname, *page_id, &mut self.buffer[idx * PAGE_SIZE..(idx + 1) * PAGE_SIZE]);
+            self.fm.write_page_by_file_id(file_id, page_id, &mut self.buffer[idx * PAGE_SIZE..(idx + 1) * PAGE_SIZE]);
             self.dirty[idx] = false;
         }
         self.release(idx);
@@ -206,14 +208,14 @@ impl BufManager {
         }
     }
 
-    pub fn get_key(&self, idx: usize) -> (String, usize) {
-        self.hash.find_page(idx).expect("bm::get_key").clone()
+    pub fn get_physical_page_pos(&self, idx: usize) -> (usize, usize) {
+        *self.hash.get_by_left(&idx).expect("bm::get_key")
     }
 
-    pub fn write_back_by_file(&mut self, fname: &str) {
+    pub fn write_back_by_file_id(&mut self, file_id: usize) {
         for i in 0..BUF_PAGE_CAPACITY {
-            let (f, _) = self.hash.find_page(i as usize).expect("bm::write_back_by_file");
-            if f == fname { self.write_back(i); } 
+            let &(f, _) = self.hash.get_by_left(&(i as usize)).expect("bm::write_back_by_file");
+            if f == file_id { self.write_back(i); } 
         }
     }
 

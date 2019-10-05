@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 util = {path = "./../util"}
+bimap = "0.4"

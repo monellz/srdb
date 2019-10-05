@@ -1,17 +1,20 @@
 use util::constants::*;
 
-use std::collections::HashMap;
 use std::fs::{File, OpenOptions, create_dir};
 use std::env;
-use std::io::{SeekFrom, prelude::*};
+use std::io::prelude::*;
 use std::os::unix::prelude::FileExt;
+use bimap::BiMap;
 
 
 
 pub struct FileManager {
     current_db: Option<String>,
-    perm_id: HashMap<String, u32>,
-    next_id: u32,
+    //文件名和file_id一一对应
+    //便于打开文件等操作
+    fname_file_id_map: BiMap<String, usize>,
+    
+    next_id: usize,
 }
 
 impl FileManager {
@@ -21,7 +24,7 @@ impl FileManager {
         env::set_current_dir("../data/").expect("fm::new set_current_dir");
         FileManager {
             current_db: None,
-            perm_id: HashMap::new(),
+            fname_file_id_map: BiMap::new(),
             next_id: 0,
         }
     }
@@ -33,22 +36,26 @@ impl FileManager {
 
     pub fn use_db(&mut self, db_name: &str) {
         self.current_db = Some(db_name.to_string());
-        let path = format!("{}/perm.id", db_name);
-        //读取对应数据库目录下的perm.id文件
+        let path = format!("{}/file.id", db_name);
+        //读取对应数据库目录下的file.id文件
         match File::open(&path) {
             Ok(mut f) => {
                 let mut contents = String::new();
                 f.read_to_string(&mut contents).unwrap();
                 if contents != "" {
-                    for s in contents.split("\n") {
+                    /* 格式 
+                    fname1 id\nfname2 id\n
+                    */
+                    for s in contents.trim().split("\n") {
                         let mut iter = s.split_whitespace();
                         let key = iter.next().take().unwrap();
-                        let val: u32 = iter.next().take().unwrap().parse().unwrap();
+                        let val: usize = iter.next().take().unwrap().parse().unwrap();
                         if self.next_id <= val {
                             self.next_id = val + 1;
                         }
                         debug_assert_eq!(iter.next(), None);
-                        self.perm_id.insert(key.to_string(), val);
+
+                        self.fname_file_id_map.insert(key.to_string(), val);
                     }
                 }
             },
@@ -58,15 +65,30 @@ impl FileManager {
             }
         }
     }
-    pub fn create_file(&mut self, fname: &str) {
+
+    //得到文件id 必须确保存在该文件
+    //TODO: fname用&str还是String?
+    pub fn get_file_id(&self, fname: String) -> usize {
+        *self.fname_file_id_map.get_by_left(&fname).unwrap()
+    }
+
+    //创建新文件并返回文件id
+    pub fn create_file(&mut self, fname: &str) -> usize{
         let db_name = self.current_db.as_ref().expect("fm::create_file parse db_name");
         let fpath = format!("{}/{}", db_name, fname);
         File::create(fpath).expect("fm::create_file");
-        self.perm_id.insert(fname.to_string(), self.next_id);
+
+        self.fname_file_id_map.insert(fname.to_string(), self.next_id);
         self.next_id += 1;
+        self.next_id - 1
     }
     pub fn create_db(&self, db_name: &str) {
         create_dir(db_name).expect("fm::craete_db");        
+    }
+
+    pub fn write_page_by_file_id(&self, file_id: usize, page_id: usize, buf: &[u8]) {
+        let fname = self.fname_file_id_map.get_by_right(&file_id).expect("fm::write_page_by_file_id get fname");
+        self.write_page(fname, page_id, buf);
     }
 
     pub fn write_page(&self, fname: &str, page_id: usize, buf: &[u8]) {
@@ -82,7 +104,12 @@ impl FileManager {
         assert!(f.write_at(buf, (page_id as u64) << PAGE_SIZE_BASE).expect("fm::write_page write") == buf.len());
     }
 
-    pub fn read_page(&self, fname: &str, page_id: usize, buf: &mut [u8]){
+    pub fn read_page_by_file_id(&self, file_id: usize, page_id: usize, buf: &mut [u8]) {
+        let fname = self.fname_file_id_map.get_by_right(&file_id).expect("fm::read_page_by_file_id get fname");
+        self.read_page(fname, page_id, buf);
+    }
+
+    pub fn read_page(&self, fname: &str, page_id: usize, buf: &mut [u8]) {
         let f = match self.current_db.as_ref() {
             Some(db_name) => {
                 let fpath = format!("{}/{}", db_name, fname);
@@ -95,22 +122,16 @@ impl FileManager {
         assert!(f.read_at(buf, (page_id as u64) << PAGE_SIZE_BASE).expect("fm::read_page read") == buf.len());
     }
 
-    pub fn get_perm_id(&self, fname: &str) -> u32 {
-        match self.perm_id.get(fname) {
-            Some(&v) => v,
-            None => panic!("not found fname {} in perm_id hashmap", fname),
-        }
-    }
 }
 
 impl Drop for FileManager {
     fn drop(&mut self) {
-        //写回perm.id
+        //写回file.id
         if let Some(db_name) = self.current_db.as_ref() {
-            let perm_path = format!("{}/perm.id", db_name);
-            let mut f = OpenOptions::new().write(true).open(perm_path).expect("fm::drop open perm.id");
-            for (k, v) in &self.perm_id {
-                f.write_fmt(format_args!("{} {}\n", k, v)).expect("fm::drop write fmt perm_id")
+            let file_id = format!("{}/file.id", db_name);
+            let mut f = OpenOptions::new().write(true).open(file_id).expect("fm::drop open file.id");
+            for (k, v) in &self.fname_file_id_map {
+                f.write_fmt(format_args!("{} {}\n", k, v)).expect("fm::drop write fmt file_id")
             }
         }
     }

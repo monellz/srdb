@@ -5,7 +5,8 @@ pub mod bm;
 #[cfg(test)]
 mod tests {
     use super::fm::FileManager;
-    use super::bm::{CustomHashMap, BufManager};
+    use super::bm::BufManager;
+    use bimap::BiMap;
     use util::constants::*;
     #[ignore]
     #[test]
@@ -38,19 +39,21 @@ mod tests {
     }
 
     #[test]
-    fn customhashmap_test() {
-        let mut hash = CustomHashMap::new();
-        hash.update(0, "test.table", 1);
-        assert_eq!(hash.find_page(0), Some(&("test.table".to_string(), 1)));
-        assert_ne!(hash.find_page(0), Some(&("test.tabll".to_string(), 1)));
+    fn bimap_test() {
+        let mut hash: BiMap<usize, (usize, usize)> = BiMap::new();
+        hash.insert(0, (0, 1));
+        assert_eq!(hash.get_by_left(&0), Some(&(0, 1)));
+        assert_ne!(hash.get_by_left(&0), Some(&(1, 1)));
         
-        assert_eq!(hash.find_idx("test.table", 1), Some(&0));
-        assert_ne!(hash.find_idx("test.table", 1), Some(&1));
+        assert_eq!(hash.get_by_right(&(0, 1)), Some(&0));
+        assert_eq!(hash.get_by_right(&(0, 0)), None);
+        assert_ne!(hash.get_by_right(&(0, 1)), Some(&1));
 
-        hash.update(0, "test.table", 0);
+        hash.insert(0, (1, 1));
         println!("{:?}", hash);
     }
 
+    //#[ignore]
     #[test]
     fn bm_test() {
         let mut bm = BufManager::new();
@@ -61,9 +64,11 @@ mod tests {
 
         let buf = [b'b'; PAGE_SIZE];
         bm.fm.write_page("tmp.table", 0, &buf);
-        let idx = bm.alloc_page("tmp.table", 0, true);
+        let file_id = bm.fm.get_file_id("tmp.table".to_string());
 
-        let idx2 = bm.get_buf_id("tmp.table", 0);
+        let idx = bm.alloc_page(file_id, 0, true);
+
+        let idx2 = bm.get_buf_id(file_id, 0);
 
         assert_eq!(idx, idx2);
         let buf = [b'a'; PAGE_SIZE];
