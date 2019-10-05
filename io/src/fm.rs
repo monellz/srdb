@@ -29,9 +29,9 @@ impl FileManager {
         }
     }
 
-    pub fn show_database() {
+    pub fn show_database(db_name: Option<&str>) -> Result<(), &str> {
         unimplemented!();
-        //遍历data文件夹
+        //如果是当前数据库，则直接输出fname_file_id_map里面元素即可
     }
 
     pub fn use_db(&mut self, db_name: &str) {
@@ -73,7 +73,7 @@ impl FileManager {
     }
 
     //创建新文件并返回文件id
-    pub fn create_file(&mut self, fname: &str) -> usize{
+    pub fn create_file(&mut self, fname: &str) -> usize {
         let db_name = self.current_db.as_ref().expect("fm::create_file parse db_name");
         let fpath = format!("{}/{}", db_name, fname);
         File::create(fpath).expect("fm::create_file");
@@ -82,6 +82,20 @@ impl FileManager {
         self.next_id += 1;
         self.next_id - 1
     }
+
+    //删除文件
+    pub fn remove_file(&mut self, fname: &str) -> Result<(), &str> {
+        //确认文件存在
+        match self.fname_file_id_map.remove_by_left(&fname.to_string()) {
+            Some(_) => {
+                //存在 则删除
+                std::fs::remove_file(format!("{}/{}", self.current_db.as_ref().expect("fm::remove_file not use any database"), fname)).expect("fm::remove_file cant remove");
+                Ok(())
+            },
+            None => Err("file not exist")
+        }
+    }
+
     pub fn create_db(&self, db_name: &str) {
         create_dir(db_name).expect("fm::craete_db");        
     }
@@ -129,7 +143,8 @@ impl Drop for FileManager {
         //写回file.id
         if let Some(db_name) = self.current_db.as_ref() {
             let file_id = format!("{}/file.id", db_name);
-            let mut f = OpenOptions::new().write(true).open(file_id).expect("fm::drop open file.id");
+            //使用create将旧内容覆盖
+            let mut f = File::create(file_id).expect("fm::drop create file.id");
             for (k, v) in &self.fname_file_id_map {
                 f.write_fmt(format_args!("{} {}\n", k, v)).expect("fm::drop write fmt file_id")
             }

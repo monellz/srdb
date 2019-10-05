@@ -1,7 +1,13 @@
 pub mod constants;
 pub mod list;
 
+pub unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
+    std::slice::from_raw_parts((p as *const T) as *const u8, std::mem::size_of::<T>())
+}
 
+pub unsafe fn read_from_u8<T: Sized>(p: &[u8]) -> T {
+    std::ptr::read(p.as_ptr() as *const _)
+}
 
 #[cfg(test)]
 mod tests {

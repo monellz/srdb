@@ -123,7 +123,7 @@ impl BufManager {
         debug_assert!(idx < BUF_PAGE_CAPACITY);
         
         if self.dirty[idx] {
-            //若为dirty　则需要先写入文件才能继续使用
+            //若为dirty　则需要先把原来的数据写入原来的文件才能继续使用
             let (prev_file_id, prev_page_id) = self.hash.get_by_left(&idx).expect("bm::fetch_page find page");
             self.fm.write_page_by_file_id(*prev_file_id, *prev_page_id, &self.buffer[idx * PAGE_SIZE..(idx + 1) * PAGE_SIZE]);
             self.dirty[idx] = false;
@@ -136,11 +136,11 @@ impl BufManager {
 
     pub fn alloc_page(&mut self, file_id: usize, page_id: usize, is_read: bool) -> usize {
         //在缓存中给file_id的page_id文件页分配缓存页
-        //is_read决定是否将文件内容读入分配的缓存页中
+        //is_read决定是否将新文件内容读入分配的缓存页中
 
         let idx = self.fetch_page(file_id, page_id);
         if is_read {
-            //将文件内容读入buf
+            //将新文件内容读入buf
             self.fm.read_page_by_file_id(file_id, page_id, &mut self.buffer[idx * PAGE_SIZE..(idx + 1) * PAGE_SIZE]);
         }
         idx
@@ -170,7 +170,7 @@ impl BufManager {
             //上一次被标记为写过的　缓存页正好是这一次的 可直接返回
             Some(val) if val == idx => return,
             _ => {
-                self.findreplace.access(idx);
+                self.findreplace.access(idx); //插入链表尾
                 self.last = Some(idx);
             },
         }
@@ -182,7 +182,8 @@ impl BufManager {
         self.access(idx);
     }
 
-    pub fn release(&mut self, idx: usize) {
+    //TODO: 这个应该用pub吗
+    fn release(&mut self, idx: usize) {
         //将idx标记为空闲(下次findreplace首先找到它)
         self.dirty[idx] = false;
         self.findreplace.free(idx); //此时idx被插入链表首
@@ -232,6 +233,11 @@ impl BufManager {
             std::ptr::copy_nonoverlapping(buf.as_ptr(), dst_ptr, buf.len());
         }
         debug_assert!(self.buffer[idx * PAGE_SIZE + offset] == buf[0]);
-        self.dirty[idx] = true;
+        //self.dirty[idx] = true;
+        self.mark_dirty(idx);
+    }
+
+    pub fn read(&self, idx: usize, buf_len: usize) -> &[u8] {
+        &self.buffer[idx * PAGE_SIZE..(idx * PAGE_SIZE + buf_len)]
     }
 }
