@@ -102,13 +102,14 @@ impl BufManager {
         //TODO
         //每次更改当前数据库应该怎么处理?
         //注: buffer申请非常慢
-        let mut buffer: Vec<u8> = Vec::new();
-        buffer.reserve(BUF_PAGE_CAPACITY * PAGE_SIZE);
-        buffer.resize(BUF_PAGE_CAPACITY * PAGE_SIZE, b'\0');
+        //let mut buffer: Vec<u8> = Vec::new();
+        //let mut buffer: Vec<u8> = vec![b'0';BUF_PAGE_CAPACITY * PAGE_SIZE];
+        //buffer.reserve(BUF_PAGE_CAPACITY * PAGE_SIZE);
+        //buffer.resize(BUF_PAGE_CAPACITY * PAGE_SIZE, b'\0');
         BufManager {
             fm: FileManager::new(),
             dirty: [false; BUF_PAGE_CAPACITY],
-            buffer: buffer,
+            buffer: vec![b'\0';BUF_PAGE_CAPACITY * PAGE_SIZE],
             hash: BiMap::new(),
             findreplace: FindReplace::new(BUF_PAGE_CAPACITY),
             last: None, 
@@ -237,7 +238,11 @@ impl BufManager {
         self.mark_dirty(idx);
     }
 
-    pub fn read(&self, idx: usize, buf_len: usize) -> &[u8] {
+    pub fn get_mut_buf_page(&mut self, idx: usize, buf_len: usize) -> &mut [u8] {
+        &mut self.buffer[idx * PAGE_SIZE..(idx * PAGE_SIZE + buf_len)]
+    }
+
+    pub fn get_buf_page(&self, idx: usize, buf_len: usize) -> &[u8] {
         &self.buffer[idx * PAGE_SIZE..(idx * PAGE_SIZE + buf_len)]
     }
 }

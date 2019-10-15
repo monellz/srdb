@@ -1,8 +1,9 @@
 pub mod page;
 
 use io::bm::BufManager;
+use util::constants::*;
 
-//Rid.0:file_id,  Rid.1: page_id
+//Rid.0:page_id,  Rid.1: offset 
 pub struct Rid(usize, usize);
 
 pub struct Record {
@@ -27,10 +28,24 @@ impl RecordManager {
         let file_id =  self.bm.fm.create_file(fname);
         
         //写入第0,1页信息进入缓冲区，并直接写回
+        let page_zero = self.bm.alloc_page(file_id, 0, false);
 
         //unimplemented!();
+        //TODO
         //test!!
         let info = page::FileInfoPage::new();
+
+
+        let bytes: &[u8] = unsafe {util::any_as_u8_slice(&info)};
+        self.bm.write(page_zero, bytes, 0);
+
+        let page_one = self.bm.alloc_page(file_id, 1, false);
+        //第1页全写0
+        self.bm.write(page_one, &[0;PAGE_SIZE], 0);
+
+        //写回
+        self.bm.write_back(page_zero);
+        self.bm.write_back(page_one);
 
         file_id
     }
@@ -65,9 +80,6 @@ impl RecordManager {
     pub fn remove_record(&mut self, rid: Rid) {
         unimplemented!()
     }
-
-
-
     /*******获得属性值满足某一要求的记录******/
 }
 
